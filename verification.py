@@ -4,6 +4,7 @@ from discord import app_commands
 import os
 import pandas as pd
 from dotenv import load_dotenv
+import io
 
 load_dotenv()
 
@@ -32,6 +33,7 @@ bot = VerificationBot()
 VERIFICATION_CHANNEL_ID = int(os.getenv('VERIFICATION_CHANNEL_ID'))
 VERIFIED_ROLE_ID = int(os.getenv('VERIFIED_ROLE_ID'))
 CSV_PATH = "confirmed.csv"
+UNVERIFIED_CSV_PATH = "unverified.csv"
 
 print("Set Verification ID as", VERIFICATION_CHANNEL_ID)
 print("Set Verified Role ID as", VERIFIED_ROLE_ID)
@@ -316,7 +318,46 @@ async def reload_csv(interaction: discord.Interaction):
     except Exception as e:
         await interaction.response.send_message(f"Error reloading participant data: {e}", ephemeral=True)
 
-
+# Admin command to get verification status and create unverified.csv
+@bot.tree.command(name="status", description="Admin command to check verification status and generate unverified.csv")
+@app_commands.default_permissions(administrator=True)
+async def verification_status(interaction: discord.Interaction):
+    """Admin command to check verification status and generate unverified.csv"""
+    try:
+        # Defer the response since this might take a moment
+        await interaction.response.defer(ephemeral=True)
+        
+        # Load participant data
+        df = load_participant_data()
+        
+        # Calculate verification statistics
+        total_participants = len(df)
+        verified_participants = df["Verified"].sum()
+        verification_rate = (verified_participants / total_participants) * 100 if total_participants > 0 else 0
+        
+        # Create unverified.csv
+        unverified_df = df[df["Verified"] == False].copy()
+        unverified_df.to_csv(UNVERIFIED_CSV_PATH, index=False)
+        
+        # Create a file-like object to hold the CSV data
+        csv_file = io.BytesIO()
+        unverified_df.to_csv(csv_file, index=False)
+        csv_file.seek(0)  # Reset file pointer to beginning
+        
+        # Create a Discord File object
+        discord_file = discord.File(csv_file, filename="unverified.csv")
+        
+        # Send response with statistics and file
+        await interaction.followup.send(
+            f"**Verification Status**\n"
+            f"• Verified: {verified_participants} out of {total_participants} participants ({verification_rate:.2f}%)\n"
+            f"• Unverified: {total_participants - verified_participants} participants\n\n"
+            f"Unverified participants list attached below:",
+            file=discord_file
+        )
+        
+    except Exception as e:
+        await interaction.followup.send(f"Error generating verification status: {e}", ephemeral=True)
 
 # Run the bot with token from .env file
 bot.run(os.getenv('TOKEN'))
